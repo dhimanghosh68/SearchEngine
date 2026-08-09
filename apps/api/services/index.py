@@ -1,7 +1,6 @@
 from elasticsearch import AsyncElasticsearch
 
-
-INDEX_NAME = "documents"
+from apps.api.config.settings import INDEX_NAME
 
 
 DOCUMENT_MAPPING = {

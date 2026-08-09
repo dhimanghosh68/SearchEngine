@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+elasticsearch
+pydantic
+pytest
+httpx<0.28
