@@ -2,7 +2,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query
 
-from apps.api.schemas.document import DocumentCreate
+from apps.api.schemas.document import (
+    DocumentCreate,
+    DocumentResponse,
+    SearchResponse,
+)
 from apps.api.services.index import create_index
 from apps.api.services.search import SearchService
 
@@ -21,7 +25,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="SearchEngine API",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -41,28 +45,30 @@ async def health() -> dict[str, str]:
     }
 
 
-@app.post("/documents")
+@app.post(
+    "/documents",
+    response_model=DocumentResponse,
+)
 async def create_document(document: DocumentCreate):
     document_id = await search_service.index_document(document)
 
     return {
         "id": document_id,
-        "message": "Document indexed successfully",
+        **document.model_dump(),
     }
 
 
-@app.get("/search")
+@app.get(
+    "/search",
+    response_model=SearchResponse,
+)
 async def search(
-    q: str = Query(min_length=1),
+    q: str = Query(min_length=1, max_length=500),
+    page: int = Query(default=1, ge=1),
     limit: int = Query(default=10, ge=1, le=100),
 ):
-    results = await search_service.search(
+    return await search_service.search(
         query=q,
         limit=limit,
+        page=page,
     )
-
-    return {
-        "query": q,
-        "count": len(results),
-        "results": results,
-    }

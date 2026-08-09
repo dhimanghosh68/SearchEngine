@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -14,3 +16,21 @@ class DocumentResponse(BaseModel):
     url: str
     description: str
     content: str
+
+
+class SearchResult(BaseModel):
+    id: str
+    score: float | None
+    title: str
+    url: str
+    description: str
+    content: str
+    highlight: dict[str, list[str]] = {}
+
+
+class SearchResponse(BaseModel):
+    query: str
+    page: int
+    limit: int
+    total: int
+    results: list[SearchResult]

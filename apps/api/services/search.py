@@ -1,4 +1,5 @@
 from typing import Any
+from urllib.parse import urlparse
 
 from elasticsearch import AsyncElasticsearch
 
@@ -19,25 +20,49 @@ class SearchService:
     async def close(self) -> None:
         await self.client.close()
 
+    @staticmethod
+    def document_id(url: str) -> str:
+        parsed = urlparse(url)
+
+        canonical = (
+            f"{parsed.scheme.lower()}://"
+            f"{parsed.netloc.lower()}"
+            f"{parsed.path.rstrip('/')}"
+        )
+
+        if parsed.query:
+            canonical += f"?{parsed.query}"
+
+        return canonical
+
     async def index_document(
         self,
         document: DocumentCreate,
     ) -> str:
-        response = await self.client.index(
+        document_id = self.document_id(document.url)
+
+        await self.client.index(
             index=INDEX_NAME,
+            id=document_id,
             document=document.model_dump(),
             refresh="wait_for",
         )
 
-        return response["_id"]
+        return document_id
 
     async def search(
         self,
         query: str,
         limit: int = 10,
-    ) -> list[dict[str, Any]]:
+        page: int = 1,
+    ) -> dict[str, Any]:
+        offset = (page - 1) * limit
+
         response = await self.client.search(
             index=INDEX_NAME,
+            from_=offset,
+            size=limit,
+            track_total_hits=True,
             query={
                 "multi_match": {
                     "query": query,
@@ -48,8 +73,26 @@ class SearchService:
                     ],
                 }
             },
-            size=limit,
+            highlight={
+                "pre_tags": ["<mark>"],
+                "post_tags": ["</mark>"],
+                "fields": {
+                    "title": {},
+                    "description": {},
+                    "content": {
+                        "fragment_size": 200,
+                        "number_of_fragments": 2,
+                    },
+                },
+            },
         )
+
+        total = response["hits"]["total"]
+
+        if isinstance(total, dict):
+            total_count = total["value"]
+        else:
+            total_count = total
 
         results = []
 
@@ -58,8 +101,18 @@ class SearchService:
                 {
                     "id": hit["_id"],
                     "score": hit["_score"],
-                    **hit["_source"],
+                    "title": hit["_source"]["title"],
+                    "url": hit["_source"]["url"],
+                    "description": hit["_source"]["description"],
+                    "content": hit["_source"]["content"],
+                    "highlight": hit.get("highlight", {}),
                 }
             )
 
-        return results
+        return {
+            "query": query,
+            "page": page,
+            "limit": limit,
+            "total": total_count,
+            "results": results,
+        }
