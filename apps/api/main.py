@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, status
+from fastapi.middleware.cors import CORSMiddleware
 
+from apps.api.config.settings import CORS_ORIGINS
 from apps.api.schemas.document import (
     BulkDocumentResponse,
     DocumentCreate,
@@ -20,7 +22,6 @@ search_service = SearchService()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await create_index(search_service._client())
-
     yield
 
     await search_service.close()
@@ -32,6 +33,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def root() -> dict[str, str]:

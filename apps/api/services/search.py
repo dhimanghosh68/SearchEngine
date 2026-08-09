@@ -162,8 +162,7 @@ class SearchService:
             track_total_hits=True,
             query={"match_all": {}},
             sort=[
-                {"_id": "asc"},
-            ],
+                {"url": "asc"},            ],
         )
 
         total = response["hits"]["total"]

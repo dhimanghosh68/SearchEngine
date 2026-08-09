@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SearchEngine</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <main class="container">
+        <header class="header">
+            <div>
+                <h1>SearchEngine</h1>
+                <p>Search and manage your indexed documents.</p>
+            </div>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab active" data-view="search-view">
+                Search
+            </button>
+            <button class="tab" data-view="documents-view">
+                Documents
+            </button>
+            <button class="tab" data-view="create-view">
+                Add Document
+            </button>
+        </nav>
+
+        <!-- SEARCH -->
+        <section id="search-view" class="view active">
+            <section class="search-panel">
+                <form id="search-form">
+                    <input
+                        id="search-input"
+                        type="search"
+                        placeholder="Search documents..."
+                        autocomplete="off"
+                        required
+                    >
+                    <button type="submit">Search</button>
+                </form>
+            </section>
+
+            <section id="search-status" class="status"></section>
+
+            <section id="results" class="results"></section>
+
+            <div id="search-pagination" class="pagination"></div>
+        </section>
+
+        <!-- DOCUMENTS -->
+        <section id="documents-view" class="view">
+            <div class="section-header">
+                <div>
+                    <h2>Documents</h2>
+                    <p>Browse indexed documents.</p>
+                </div>
+
+                <button id="refresh-documents">
+                    Refresh
+                </button>
+            </div>
+
+            <section id="documents-status" class="status"></section>
+
+            <section id="documents-list" class="documents-list"></section>
+
+            <div id="documents-pagination" class="pagination"></div>
+        </section>
+
+        <!-- CREATE / EDIT -->
+        <section id="create-view" class="view">
+            <div class="section-header">
+                <div>
+                    <h2 id="form-title">Add Document</h2>
+                    <p>Create or update an indexed document.</p>
+                </div>
+            </div>
+
+            <form id="document-form" class="document-form">
+                <input
+                    id="document-id"
+                    type="hidden"
+                >
+
+                <label for="document-title">
+                    Title
+                </label>
+
+                <input
+                    id="document-title"
+                    type="text"
+                    maxlength="500"
+                    required
+                >
+
+                <label for="document-url">
+                    URL
+                </label>
+
+                <input
+                    id="document-url"
+                    type="url"
+                    maxlength="2048"
+                    placeholder="https://example.com/page"
+                    required
+                >
+
+                <label for="document-description">
+                    Description
+                </label>
+
+                <textarea
+                    id="document-description"
+                    maxlength="2000"
+                    rows="4"
+                ></textarea>
+
+                <label for="document-content">
+                    Content
+                </label>
+
+                <textarea
+                    id="document-content"
+                    rows="12"
+                ></textarea>
+
+                <div class="form-actions">
+                    <button type="submit">
+                        Save Document
+                    </button>
+
+                    <button
+                        id="cancel-edit"
+                        type="button"
+                        class="secondary"
+                        hidden
+                    >
+                        Cancel
+                    </button>
+                </div>
+            </form>
+
+            <section id="form-status" class="status"></section>
+        </section>
+    </main>
+
+    <script src="/app.js"></script>
+</body>
+</html>
