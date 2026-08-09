@@ -1,0 +1,68 @@
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Query
+
+from apps.api.schemas.document import DocumentCreate
+from apps.api.services.index import create_index
+from apps.api.services.search import SearchService
+
+
+search_service = SearchService()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await create_index(search_service.client)
+
+    yield
+
+    await search_service.close()
+
+
+app = FastAPI(
+    title="SearchEngine API",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+
+@app.get("/")
+async def root() -> dict[str, str]:
+    return {"service": "search-engine-api"}
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    elasticsearch_ok = await search_service.ping()
+
+    return {
+        "status": "ok",
+        "elasticsearch": "ok" if elasticsearch_ok else "error",
+    }
+
+
+@app.post("/documents")
+async def create_document(document: DocumentCreate):
+    document_id = await search_service.index_document(document)
+
+    return {
+        "id": document_id,
+        "message": "Document indexed successfully",
+    }
+
+
+@app.get("/search")
+async def search(
+    q: str = Query(min_length=1),
+    limit: int = Query(default=10, ge=1, le=100),
+):
+    results = await search_service.search(
+        query=q,
+        limit=limit,
+    )
+
+    return {
+        "query": q,
+        "count": len(results),
+        "results": results,
+    }
