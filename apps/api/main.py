@@ -1,6 +1,6 @@
+from fastapi import FastAPI, HTTPException, Query
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query
 
 from apps.api.schemas.document import (
     DocumentCreate,
@@ -57,6 +57,20 @@ async def create_document(document: DocumentCreate):
         **document.model_dump(),
     }
 
+@app.get(
+    "/documents/{document_id:path}",
+    response_model=DocumentResponse,
+)
+async def get_document(document_id: str):
+    document = await search_service.get_document(document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found",
+        )
+
+    return document
 
 @app.get(
     "/search",

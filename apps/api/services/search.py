@@ -1,8 +1,7 @@
 from typing import Any
 from urllib.parse import urlparse
 
-from elasticsearch import AsyncElasticsearch
-
+from elasticsearch import AsyncElasticsearch, NotFoundError
 from apps.api.schemas.document import DocumentCreate
 
 
@@ -64,6 +63,25 @@ class SearchService:
         )
 
         return document_id
+
+    async def get_document(
+        self,
+        document_id: str,
+    ) -> dict[str, Any] | None:
+        try:
+            response = await self.client.get(
+                index=INDEX_NAME,
+                id=document_id,
+            )
+        except NotFoundError:
+            return None
+
+        source = response["_source"]
+
+        return {
+            "id": response["_id"],
+            **source,
+        }
 
     async def search(
         self,
