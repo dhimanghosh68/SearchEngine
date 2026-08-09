@@ -24,11 +24,26 @@ class SearchService:
     def document_id(url: str) -> str:
         parsed = urlparse(url)
 
-        canonical = (
-            f"{parsed.scheme.lower()}://"
-            f"{parsed.netloc.lower()}"
-            f"{parsed.path.rstrip('/')}"
-        )
+        scheme = parsed.scheme.lower()
+        hostname = (parsed.hostname or "").lower()
+
+        if not scheme or not hostname:
+            raise ValueError("Invalid URL")
+
+        port = parsed.port
+
+        if port and not (
+            (scheme == "http" and port == 80)
+            or (scheme == "https" and port == 443)
+        ):
+            hostname = f"{hostname}:{port}"
+
+        path = parsed.path.rstrip("/")
+
+        if not path:
+            path = "/"
+
+        canonical = f"{scheme}://{hostname}{path}"
 
         if parsed.query:
             canonical += f"?{parsed.query}"
