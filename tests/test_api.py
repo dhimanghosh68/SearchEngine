@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from apps.api.main import app
 from apps.api.services.search import SearchService
+from apps.api.schemas.document import DocumentCreate
 
 
 def test_root():
@@ -155,3 +156,240 @@ def test_search_response_mapping():
     assert result["results"][0]["highlight"]["title"] == [
         "<mark>Python</mark>"
     ]
+
+def test_list_documents_mapping():
+    service = SearchService()
+
+    response = {
+        "hits": {
+            "total": {"value": 2},
+            "hits": [
+                {
+                    "_id": "doc-1",
+                    "_source": {
+                        "title": "Python",
+                        "url": "https://example.com/python",
+                        "description": "Python description",
+                        "content": "Python content",
+                    },
+                },
+                {
+                    "_id": "doc-2",
+                    "_source": {
+                        "title": "FastAPI",
+                        "url": "https://example.com/fastapi",
+                        "description": "FastAPI description",
+                        "content": "FastAPI content",
+                    },
+                },
+            ],
+        }
+    }
+
+    async def fake_search(**kwargs):
+        assert kwargs["from_"] == 20
+        assert kwargs["size"] == 20
+        assert kwargs["track_total_hits"] is True
+        return response
+
+    with patch.object(
+        service._client(),
+        "search",
+        new=AsyncMock(side_effect=fake_search),
+    ):
+        import asyncio
+
+        result = asyncio.run(
+            service.list_documents(page=2, limit=20)
+        )
+
+    assert result["page"] == 2
+    assert result["limit"] == 20
+    assert result["total"] == 2
+    assert result["results"][0]["id"] == "doc-1"
+    assert result["results"][1]["id"] == "doc-2"
+
+
+def test_get_document_mapping():
+    service = SearchService()
+
+    response = {
+        "_id": "doc-1",
+        "_source": {
+            "title": "Python",
+            "url": "https://example.com/python",
+            "description": "Python description",
+            "content": "Python content",
+        },
+    }
+
+    with patch.object(
+        service._client(),
+        "get",
+        new=AsyncMock(return_value=response),
+    ):
+        import asyncio
+
+        result = asyncio.run(
+            service.get_document("doc-1")
+        )
+
+    assert result is not None
+    assert result["id"] == "doc-1"
+    assert result["title"] == "Python"
+    assert result["url"] == "https://example.com/python"
+
+
+def test_get_missing_document_returns_none():
+    from elasticsearch import NotFoundError
+
+    service = SearchService()
+
+    error = NotFoundError(
+        message="Document not found",
+        meta={},
+        body={},
+    )
+
+    with patch.object(
+        service._client(),
+        "get",
+        new=AsyncMock(side_effect=error),
+    ):
+        import asyncio
+
+        result = asyncio.run(
+            service.get_document("missing")
+        )
+
+    assert result is None
+
+
+def test_delete_document_success():
+    service = SearchService()
+
+    with patch.object(
+        service._client(),
+        "delete",
+        new=AsyncMock(return_value={}),
+    ) as mock_delete:
+        import asyncio
+
+        result = asyncio.run(
+            service.delete_document("doc-1")
+        )
+
+    assert result is True
+    mock_delete.assert_awaited_once()
+
+
+def test_delete_missing_document_returns_false():
+    from elasticsearch import NotFoundError
+
+    service = SearchService()
+
+    error = NotFoundError(
+        message="Document not found",
+        meta={},
+        body={},
+    )
+
+    with patch.object(
+        service._client(),
+        "delete",
+        new=AsyncMock(side_effect=error),
+    ):
+        import asyncio
+
+        result = asyncio.run(
+            service.delete_document("missing")
+        )
+
+    assert result is False
+
+
+def test_bulk_index_success():
+    service = SearchService()
+
+    documents = [
+        DocumentCreate(
+            title="Python",
+            url="https://example.com/python",
+            description="Python description",
+            content="Python content",
+        ),
+        DocumentCreate(
+            title="FastAPI",
+            url="https://example.com/fastapi",
+            description="FastAPI description",
+            content="FastAPI content",
+        ),
+    ]
+
+    with patch.object(
+        service._client(),
+        "bulk",
+        new=AsyncMock(
+            return_value={
+                "errors": False,
+                "items": [],
+            }
+        ),
+    ) as mock_bulk:
+        import asyncio
+
+        result = asyncio.run(
+            service.bulk_index(documents)
+        )
+
+    assert result == [
+        "https://example.com/python",
+        "https://example.com/fastapi",
+    ]
+
+    mock_bulk.assert_awaited_once()
+
+
+def test_bulk_index_failure():
+    service = SearchService()
+
+    documents = [
+        DocumentCreate(
+            title="Python",
+            url="https://example.com/python",
+            description="Python description",
+            content="Python content",
+        )
+    ]
+
+    with patch.object(
+        service._client(),
+        "bulk",
+        new=AsyncMock(
+            return_value={
+                "errors": True,
+                "items": [
+                    {
+                        "index": {
+                            "error": {
+                                "type": "mapper_parsing_exception",
+                                "reason": "Invalid field",
+                            }
+                        }
+                    }
+                ],
+            }
+        ),
+    ):
+        import asyncio
+
+        try:
+            asyncio.run(
+                service.bulk_index(documents)
+            )
+        except RuntimeError as exc:
+            assert "Bulk indexing failed" in str(exc)
+        else:
+            raise AssertionError(
+                "Expected RuntimeError"
+            )
