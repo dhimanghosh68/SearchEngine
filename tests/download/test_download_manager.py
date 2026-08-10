@@ -5,6 +5,7 @@ from apps.api.download.contracts import (
     DownloadState,
 )
 from apps.api.download.manager import DownloadManager
+from apps.api.platform.contracts import NetworkResponse
 
 
 class FakeNetwork:
@@ -21,7 +22,11 @@ class FakeNetwork:
             for chunk in self.chunks:
                 yield chunk
 
-        return stream()
+        return NetworkResponse(
+            status_code=200,
+            headers={"content-length": str(sum(map(len, self.chunks)))},
+            body=stream(),
+        )
 
 
 class FakeStorage:
