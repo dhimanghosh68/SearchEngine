@@ -73,6 +73,62 @@ class DownloadManager:
 
                 if existing_size > 0:
                     if response.status_code == 206:
+                        content_range = response.headers.get(
+                            "content-range"
+                        )
+
+                        if content_range is None:
+                            raise RuntimeError(
+                                "Resumed download missing "
+                                "Content-Range"
+                            )
+
+                        parts = content_range.strip().split(" ")
+
+                        if len(parts) != 2 or parts[0].lower() != "bytes":
+                            raise RuntimeError(
+                                "Invalid Content-Range"
+                            )
+
+                        range_part, total_part = parts[1].split("/", 1)
+
+                        if "-" not in range_part:
+                            raise RuntimeError(
+                                "Invalid Content-Range"
+                            )
+
+                        start_text, end_text = range_part.split("-", 1)
+
+                        try:
+                            range_start = int(start_text)
+                            range_end = int(end_text)
+                        except ValueError as exc:
+                            raise RuntimeError(
+                                "Invalid Content-Range"
+                            ) from exc
+
+                        if range_start != existing_size:
+                            raise RuntimeError(
+                                "Content-Range start does not "
+                                "match persisted file size"
+                            )
+
+                        if range_end < range_start:
+                            raise RuntimeError(
+                                "Invalid Content-Range"
+                            )
+
+                        if (
+                            request.expected_size is not None
+                            and total_part != "*"
+                            and int(total_part)
+                            != request.expected_size
+                        ):
+                            raise RuntimeError(
+                                "Content-Range total does not "
+                                "match expected size"
+                            )
+
                         append_mode = True
                         downloaded_bytes = existing_size
 

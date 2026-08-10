@@ -14,10 +14,12 @@ class FakeNetwork:
         chunks: list[bytes],
         *,
         status_code: int = 200,
+        headers: dict[str, str] | None = None,
         fail_after_chunks: int | None = None,
     ) -> None:
         self.chunks = chunks
         self.status_code = status_code
+        self.headers = headers or {}
         self.fail_after_chunks = fail_after_chunks
         self.last_headers: dict[str, str] | None = None
         self.call_count = 0
@@ -37,17 +39,42 @@ class FakeNetwork:
                     self.fail_after_chunks is not None
                     and index >= self.fail_after_chunks
                 ):
-                    raise ConnectionError("simulated network failure")
+                    raise ConnectionError(
+                        "simulated network failure"
+                    )
 
                 yield chunk
 
+        response_headers = {
+            "content-length": str(
+                sum(map(len, self.chunks))
+            ),
+            **self.headers,
+        }
+
+        if (
+            self.status_code == 206
+            and "content-range" not in response_headers
+            and self.last_headers is not None
+            and "Range" in self.last_headers
+        ):
+            range_value = self.last_headers["Range"]
+
+            if range_value.startswith("bytes="):
+                start = int(
+                    range_value.removeprefix("bytes=").split("-", 1)[0]
+                )
+                body_size = sum(map(len, self.chunks))
+                end = start + body_size - 1
+                total = start + body_size
+
+                response_headers["content-range"] = (
+                    f"bytes {start}-{end}/{total}"
+                )
+
         return NetworkResponse(
             status_code=self.status_code,
-            headers={
-                "content-length": str(
-                    sum(map(len, self.chunks))
-                )
-            },
+            headers=response_headers,
             body=stream(),
         )
 
@@ -318,7 +345,16 @@ async def test_download_retry_resumes_from_persisted_bytes():
                 status_code=(
                     200 if self.calls == 1 else 206
                 ),
-                headers={"content-length": "5"},
+                headers={
+                    "content-length": "5",
+                    **(
+                        {
+                            "content-range": "bytes 6-10/11",
+                        }
+                        if self.calls > 1
+                        else {}
+                    ),
+                },
                 body=stream(),
             )
 
@@ -348,3 +384,69 @@ async def test_download_retry_resumes_from_persisted_bytes():
     assert network.headers[1] == {
         "Range": "bytes=6-",
     }
+
+
+@pytest.mark.asyncio
+async def test_download_resume_requires_matching_content_range():
+    network = FakeNetwork(
+        [b"world"],
+        status_code=206,
+        headers={
+            "content-range": "bytes 0-4/11",
+        },
+    )
+    storage = FakeStorage()
+    storage.files["file.bin"] = b"hello "
+
+    clock = FakeClock()
+
+    manager = DownloadManager(
+        network=network,
+        storage=storage,
+        clock=clock,
+    )
+
+    result = await manager.download(
+        DownloadRequest(
+            url="https://example.com/file.bin",
+            destination="file.bin",
+            expected_size=11,
+            max_retries=0,
+        )
+    )
+
+    assert result.progress.state == DownloadState.FAILED
+    assert storage.files["file.bin"] == b"hello "
+
+
+@pytest.mark.asyncio
+async def test_download_resume_rejects_invalid_content_range():
+    network = FakeNetwork(
+        [b"world"],
+        status_code=206,
+        headers={
+            "content-range": "invalid",
+        },
+    )
+    storage = FakeStorage()
+    storage.files["file.bin"] = b"hello "
+
+    clock = FakeClock()
+
+    manager = DownloadManager(
+        network=network,
+        storage=storage,
+        clock=clock,
+    )
+
+    result = await manager.download(
+        DownloadRequest(
+            url="https://example.com/file.bin",
+            destination="file.bin",
+            expected_size=11,
+            max_retries=0,
+        )
+    )
+
+    assert result.progress.state == DownloadState.FAILED
+    assert storage.files["file.bin"] == b"hello "
