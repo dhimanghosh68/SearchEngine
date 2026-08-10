@@ -4,6 +4,13 @@ from dataclasses import dataclass
 from typing import AsyncIterator, Protocol, Sequence
 
 
+@dataclass(frozen=True)
+class NetworkResponse:
+    status_code: int
+    headers: dict[str, str]
+    body: AsyncIterator[bytes]
+
+
 class FileStorage(Protocol):
     async def read(self, path: str) -> bytes:
         ...
@@ -33,7 +40,7 @@ class NetworkClient(Protocol):
         url: str,
         *,
         headers: dict[str, str] | None = None,
-    ) -> AsyncIterator[bytes]:
+    ) -> NetworkResponse:
         ...
 
 
