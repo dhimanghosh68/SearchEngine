@@ -51,9 +51,12 @@ class DownloadController:
                 operation.result = result
                 operation.state = result.progress.state
                 return result.progress
+
             except asyncio.CancelledError:
-                operation.state = DownloadState.CANCELLED
+                if operation.state != DownloadState.PAUSED:
+                    operation.state = DownloadState.CANCELLED
                 raise
+
             except Exception:
                 operation.state = DownloadState.FAILED
                 raise
@@ -70,11 +73,70 @@ class DownloadController:
 
         return await task
 
+    async def pause(self, destination: str) -> None:
+        operation = self._require(destination)
+
+        if operation.state == DownloadState.COMPLETED:
+            raise RuntimeError(
+                "Cannot pause a completed download"
+            )
+
+        if operation.state == DownloadState.FAILED:
+            raise RuntimeError(
+                "Cannot pause a failed download"
+            )
+
+        if operation.state == DownloadState.CANCELLED:
+            raise RuntimeError(
+                "Cannot pause a cancelled download"
+            )
+
+        if operation.task.done():
+            return
+
+        operation.state = DownloadState.PAUSED
+        operation.task.cancel()
+
+        try:
+            await operation.task
+        except asyncio.CancelledError:
+            pass
+
+        operation.state = DownloadState.PAUSED
+
+    async def resume(
+        self,
+        destination: str,
+    ) -> DownloadProgress:
+        operation = self._require(destination)
+
+        if not operation.task.done():
+            raise RuntimeError(
+                "Download is already active"
+            )
+
+        if operation.state != DownloadState.PAUSED:
+            raise RuntimeError(
+                f"Cannot resume download in state "
+                f"{operation.state.value}"
+            )
+
+        return await self.start(operation.request)
+
     async def cancel(self, destination: str) -> None:
         operation = self._require(destination)
 
-        if operation.task.done():
-            operation.state = DownloadState.CANCELLED
+        if operation.state == DownloadState.COMPLETED:
+            raise RuntimeError(
+                "Cannot cancel a completed download"
+            )
+
+        if operation.state == DownloadState.FAILED:
+            raise RuntimeError(
+                "Cannot cancel a failed download"
+            )
+
+        if operation.state == DownloadState.CANCELLED:
             return
 
         operation.task.cancel()
