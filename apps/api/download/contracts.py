@@ -44,3 +44,29 @@ class DownloadProgress:
             / self.total_bytes
             * 100
         )
+
+
+@dataclass(frozen=True)
+class TransferStats:
+    requested_bytes: int
+    transferred_bytes: int
+    retry_count: int
+    connection_count: int
+    duration_seconds: float
+
+    @property
+    def overhead_bytes(self) -> int:
+        return max(
+            0,
+            self.transferred_bytes - self.requested_bytes,
+        )
+
+    @property
+    def average_bytes_per_second(self) -> float:
+        if self.duration_seconds <= 0:
+            return 0.0
+
+        return (
+            self.transferred_bytes
+            / self.duration_seconds
+        )
