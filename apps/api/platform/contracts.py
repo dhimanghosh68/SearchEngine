@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import AsyncIterator, Protocol, Sequence
 
 
 class FileStorage(Protocol):
@@ -9,6 +9,9 @@ class FileStorage(Protocol):
         ...
 
     async def write(self, path: str, data: bytes) -> None:
+        ...
+
+    async def append(self, path: str, data: bytes) -> None:
         ...
 
     async def exists(self, path: str) -> bool:
@@ -20,6 +23,9 @@ class FileStorage(Protocol):
     async def mkdir(self, path: str) -> None:
         ...
 
+    async def move(self, source: str, destination: str) -> None:
+        ...
+
 
 class NetworkClient(Protocol):
     async def get(
@@ -27,7 +33,7 @@ class NetworkClient(Protocol):
         url: str,
         *,
         headers: dict[str, str] | None = None,
-    ) -> bytes:
+    ) -> AsyncIterator[bytes]:
         ...
 
 
