@@ -9,8 +9,15 @@ from apps.api.platform.contracts import NetworkResponse
 
 
 class FakeNetwork:
-    def __init__(self, chunks: list[bytes]) -> None:
+    def __init__(
+        self,
+        chunks: list[bytes],
+        *,
+        status_code: int = 200,
+    ) -> None:
         self.chunks = chunks
+        self.status_code = status_code
+        self.last_headers: dict[str, str] | None = None
 
     async def get(
         self,
@@ -18,13 +25,19 @@ class FakeNetwork:
         *,
         headers: dict[str, str] | None = None,
     ):
+        self.last_headers = headers
+
         async def stream():
             for chunk in self.chunks:
                 yield chunk
 
         return NetworkResponse(
-            status_code=200,
-            headers={"content-length": str(sum(map(len, self.chunks)))},
+            status_code=self.status_code,
+            headers={
+                "content-length": str(
+                    sum(map(len, self.chunks))
+                )
+            },
             body=stream(),
         )
 
@@ -143,3 +156,98 @@ async def test_download_verifies_sha256():
     )
 
     assert result.progress.state == DownloadState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_download_resumes_partial_file():
+    network = FakeNetwork(
+        [b"world"],
+        status_code=206,
+    )
+    storage = FakeStorage()
+    storage.files["file.bin"] = b"hello "
+
+    clock = FakeClock()
+
+    manager = DownloadManager(
+        network=network,
+        storage=storage,
+        clock=clock,
+    )
+
+    result = await manager.download(
+        DownloadRequest(
+            url="https://example.com/file.bin",
+            destination="file.bin",
+            expected_size=11,
+        )
+    )
+
+    assert result.progress.state == DownloadState.COMPLETED
+    assert storage.files["file.bin"] == b"hello world"
+    assert result.stats.transferred_bytes == 5
+    assert network.last_headers == {
+        "Range": "bytes=6-",
+    }
+
+
+@pytest.mark.asyncio
+async def test_download_restarts_when_server_ignores_range():
+    network = FakeNetwork([b"hello world"])
+    storage = FakeStorage()
+    storage.files["file.bin"] = b"hello "
+
+    clock = FakeClock()
+
+    manager = DownloadManager(
+        network=network,
+        storage=storage,
+        clock=clock,
+    )
+
+    result = await manager.download(
+        DownloadRequest(
+            url="https://example.com/file.bin",
+            destination="file.bin",
+            expected_size=11,
+        )
+    )
+
+    assert result.progress.state == DownloadState.COMPLETED
+    assert storage.files["file.bin"] == b"hello world"
+    assert result.stats.transferred_bytes == 11
+    assert network.last_headers == {
+        "Range": "bytes=6-",
+    }
+
+
+@pytest.mark.asyncio
+async def test_download_resume_verifies_complete_sha256():
+    network = FakeNetwork(
+        [b"world"],
+        status_code=206,
+    )
+    storage = FakeStorage()
+    storage.files["file.bin"] = b"hello "
+
+    clock = FakeClock()
+
+    manager = DownloadManager(
+        network=network,
+        storage=storage,
+        clock=clock,
+    )
+
+    result = await manager.download(
+        DownloadRequest(
+            url="https://example.com/file.bin",
+            destination="file.bin",
+            expected_size=11,
+            expected_sha256=(
+                "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            ),
+        )
+    )
+
+    assert result.progress.state == DownloadState.COMPLETED
+    assert storage.files["file.bin"] == b"hello world"
