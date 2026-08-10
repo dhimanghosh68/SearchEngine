@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, status
@@ -21,7 +22,37 @@ search_service = SearchService()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await create_index(search_service._client())
+    for attempt in range(1, 11):
+        try:
+            client = search_service._client()
+
+            if not await client.ping():
+                raise RuntimeError("Elasticsearch ping failed")
+
+            await create_index(client)
+
+            print(
+                f"Elasticsearch ready on startup "
+                f"(attempt {attempt}/10)"
+            )
+            break
+
+        except Exception as exc:
+            if attempt == 10:
+                raise RuntimeError(
+                    "Elasticsearch did not become ready after "
+                    "10 startup attempts"
+                ) from exc
+
+            delay = min(2 ** (attempt - 1), 5)
+
+            print(
+                f"Elasticsearch not ready "
+                f"(attempt {attempt}/10): {exc}"
+            )
+            print(f"Retrying in {delay}s...")
+            await asyncio.sleep(delay)
+
     yield
 
     await search_service.close()
@@ -33,6 +64,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -40,6 +72,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/")
 async def root() -> dict[str, str]:
