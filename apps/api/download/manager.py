@@ -46,102 +46,112 @@ class DownloadManager:
         retry_count = 0
         connection_count = 0
 
-        existing_size = 0
+        state = DownloadState.FAILED
 
-        if await self.storage.exists(request.destination):
-            existing_data = await self.storage.read(
-                request.destination
-            )
-            existing_size = len(existing_data)
+        while True:
+            existing_size = 0
 
-        headers: dict[str, str] | None = None
+            if await self.storage.exists(request.destination):
+                existing_data = await self.storage.read(
+                    request.destination
+                )
+                existing_size = len(existing_data)
 
-        if existing_size > 0:
-            headers = {
-                "Range": f"bytes={existing_size}-",
-            }
-
-        try:
-            response = await self.network.get(
-                request.url,
-                headers=headers,
-            )
-            connection_count += 1
+            headers: dict[str, str] | None = None
 
             if existing_size > 0:
-                if response.status_code == 206:
-                    append_mode = True
-                    downloaded_bytes = existing_size
+                headers = {
+                    "Range": f"bytes={existing_size}-",
+                }
 
-                elif response.status_code == 200:
-                    # Server ignored Range. Restart safely.
-                    await self.storage.delete(
-                        request.destination
-                    )
+            try:
+                response = await self.network.get(
+                    request.url,
+                    headers=headers,
+                )
+                connection_count += 1
+
+                if existing_size > 0:
+                    if response.status_code == 206:
+                        append_mode = True
+                        downloaded_bytes = existing_size
+
+                    elif response.status_code == 200:
+                        # Server ignored Range. Restart safely.
+                        await self.storage.delete(
+                            request.destination
+                        )
+                        append_mode = False
+                        downloaded_bytes = 0
+
+                    else:
+                        raise RuntimeError(
+                            f"Unable to resume download: "
+                            f"HTTP {response.status_code}"
+                        )
+                else:
+                    if response.status_code != 200:
+                        raise RuntimeError(
+                            f"Download failed: "
+                            f"HTTP {response.status_code}"
+                        )
+
                     append_mode = False
                     downloaded_bytes = 0
 
-                else:
-                    raise RuntimeError(
-                        f"Unable to resume download: "
-                        f"HTTP {response.status_code}"
-                    )
-            else:
-                if response.status_code != 200:
-                    raise RuntimeError(
-                        f"Download failed: "
-                        f"HTTP {response.status_code}"
-                    )
+                hasher = sha256()
 
-                append_mode = False
-
-            hasher = sha256()
-
-            if append_mode:
-                hasher.update(
-                    await self.storage.read(
+                if append_mode:
+                    existing_data = await self.storage.read(
                         request.destination
                     )
-                )
+                    hasher.update(existing_data)
 
-            if not append_mode:
-                await self.storage.write(
-                    request.destination,
-                    b"",
-                )
+                else:
+                    await self.storage.write(
+                        request.destination,
+                        b"",
+                    )
 
-            async for chunk in response.body:
-                if not chunk:
-                    continue
+                async for chunk in response.body:
+                    if not chunk:
+                        continue
 
-                transferred_bytes += len(chunk)
-                downloaded_bytes += len(chunk)
+                    transferred_bytes += len(chunk)
+                    downloaded_bytes += len(chunk)
 
-                hasher.update(chunk)
+                    hasher.update(chunk)
 
-                await self.storage.append(
-                    request.destination,
-                    chunk,
-                )
+                    await self.storage.append(
+                        request.destination,
+                        chunk,
+                    )
 
-            if (
-                request.expected_size is not None
-                and downloaded_bytes != request.expected_size
-            ):
+                if (
+                    request.expected_size is not None
+                    and downloaded_bytes != request.expected_size
+                ):
+                    state = DownloadState.FAILED
+
+                elif (
+                    request.expected_sha256 is not None
+                    and hasher.hexdigest().lower()
+                    != request.expected_sha256.lower()
+                ):
+                    state = DownloadState.FAILED
+
+                else:
+                    state = DownloadState.COMPLETED
+
+                break
+
+            except Exception:
                 state = DownloadState.FAILED
 
-            elif (
-                request.expected_sha256 is not None
-                and hasher.hexdigest().lower()
-                != request.expected_sha256.lower()
-            ):
-                state = DownloadState.FAILED
+                if retry_count >= request.max_retries:
+                    break
 
-            else:
-                state = DownloadState.COMPLETED
-
-        except Exception:
-            state = DownloadState.FAILED
+                retry_count += 1
 
         duration = max(
             0.0,

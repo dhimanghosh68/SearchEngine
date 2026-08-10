@@ -14,10 +14,13 @@ class FakeNetwork:
         chunks: list[bytes],
         *,
         status_code: int = 200,
+        fail_after_chunks: int | None = None,
     ) -> None:
         self.chunks = chunks
         self.status_code = status_code
+        self.fail_after_chunks = fail_after_chunks
         self.last_headers: dict[str, str] | None = None
+        self.call_count = 0
 
     async def get(
         self,
@@ -26,9 +29,16 @@ class FakeNetwork:
         headers: dict[str, str] | None = None,
     ):
         self.last_headers = headers
+        self.call_count += 1
 
         async def stream():
-            for chunk in self.chunks:
+            for index, chunk in enumerate(self.chunks):
+                if (
+                    self.fail_after_chunks is not None
+                    and index >= self.fail_after_chunks
+                ):
+                    raise ConnectionError("simulated network failure")
+
                 yield chunk
 
         return NetworkResponse(
@@ -251,3 +261,90 @@ async def test_download_resume_verifies_complete_sha256():
 
     assert result.progress.state == DownloadState.COMPLETED
     assert storage.files["file.bin"] == b"hello world"
+
+
+@pytest.mark.asyncio
+async def test_download_retries_after_stream_failure():
+    network = FakeNetwork(
+        [b"hello ", b"world"],
+        fail_after_chunks=1,
+    )
+    storage = FakeStorage()
+    clock = FakeClock()
+
+    manager = DownloadManager(
+        network=network,
+        storage=storage,
+        clock=clock,
+    )
+
+    result = await manager.download(
+        DownloadRequest(
+            url="https://example.com/file.bin",
+            destination="file.bin",
+            expected_size=11,
+            max_retries=1,
+        )
+    )
+
+    assert result.progress.state == DownloadState.FAILED
+    assert result.stats.retry_count == 1
+    assert result.stats.connection_count == 2
+
+
+@pytest.mark.asyncio
+async def test_download_retry_resumes_from_persisted_bytes():
+    class RetryNetwork:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.headers: list[dict[str, str] | None] = []
+
+        async def get(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+        ):
+            self.calls += 1
+            self.headers.append(headers)
+
+            async def stream():
+                if self.calls == 1:
+                    yield b"hello "
+                    raise ConnectionError("simulated failure")
+                yield b"world"
+
+            return NetworkResponse(
+                status_code=(
+                    200 if self.calls == 1 else 206
+                ),
+                headers={"content-length": "5"},
+                body=stream(),
+            )
+
+    network = RetryNetwork()
+    storage = FakeStorage()
+    clock = FakeClock()
+
+    manager = DownloadManager(
+        network=network,
+        storage=storage,
+        clock=clock,
+    )
+
+    result = await manager.download(
+        DownloadRequest(
+            url="https://example.com/file.bin",
+            destination="file.bin",
+            expected_size=11,
+            max_retries=1,
+        )
+    )
+
+    assert result.progress.state == DownloadState.COMPLETED
+    assert storage.files["file.bin"] == b"hello world"
+    assert result.stats.retry_count == 1
+    assert result.stats.connection_count == 2
+    assert network.headers[1] == {
+        "Range": "bytes=6-",
+    }
