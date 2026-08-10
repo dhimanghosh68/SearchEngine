@@ -27,11 +27,3 @@ def create_runtime() -> Runtime:
     return Runtime(
         capabilities=capabilities,
     )
-def test_runtime_capabilities_are_fully_constructed():
-    runtime = create_runtime()
-    capabilities = runtime.capabilities
-
-    assert capabilities.filesystem is not None
-    assert capabilities.network is not None
-    assert capabilities.process is not None
-    assert capabilities.clock is not None

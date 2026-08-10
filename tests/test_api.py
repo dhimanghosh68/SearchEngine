@@ -628,3 +628,13 @@ def test_create_index_reuses_existing_initial_index():
         name="documents",
         is_write_index=True,
     )
+
+def test_runtime_is_available():
+    with TestClient(app) as client:
+        runtime = client.app.state.runtime
+
+        assert runtime is not None
+        assert runtime.capabilities.filesystem is not None
+        assert runtime.capabilities.network is not None
+        assert runtime.capabilities.process is not None
+        assert runtime.capabilities.clock is not None

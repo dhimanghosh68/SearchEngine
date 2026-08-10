@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-
+from apps.api.core.runtime import create_runtime
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -22,6 +22,7 @@ search_service = SearchService()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.runtime = create_runtime()
     for attempt in range(1, 11):
         try:
             client = search_service._client()
