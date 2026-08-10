@@ -43,18 +43,79 @@ class DownloadManager:
 
         downloaded_bytes = 0
         transferred_bytes = 0
+        retry_count = 0
+        connection_count = 0
 
-        hasher = sha256()
+        existing_size = 0
+
+        if await self.storage.exists(request.destination):
+            existing_data = await self.storage.read(
+                request.destination
+            )
+            existing_size = len(existing_data)
+
+        headers: dict[str, str] | None = None
+
+        if existing_size > 0:
+            headers = {
+                "Range": f"bytes={existing_size}-",
+            }
 
         try:
-            stream = await self.network.get(request.url)
+            response = await self.network.get(
+                request.url,
+                headers=headers,
+            )
+            connection_count += 1
 
-            async for chunk in stream:
+            if existing_size > 0:
+                if response.status_code == 206:
+                    append_mode = True
+                    downloaded_bytes = existing_size
+
+                elif response.status_code == 200:
+                    # Server ignored Range. Restart safely.
+                    await self.storage.delete(
+                        request.destination
+                    )
+                    append_mode = False
+                    downloaded_bytes = 0
+
+                else:
+                    raise RuntimeError(
+                        f"Unable to resume download: "
+                        f"HTTP {response.status_code}"
+                    )
+            else:
+                if response.status_code != 200:
+                    raise RuntimeError(
+                        f"Download failed: "
+                        f"HTTP {response.status_code}"
+                    )
+
+                append_mode = False
+
+            hasher = sha256()
+
+            if append_mode:
+                hasher.update(
+                    await self.storage.read(
+                        request.destination
+                    )
+                )
+
+            if not append_mode:
+                await self.storage.write(
+                    request.destination,
+                    b"",
+                )
+
+            async for chunk in response.body:
                 if not chunk:
                     continue
 
-                downloaded_bytes += len(chunk)
                 transferred_bytes += len(chunk)
+                downloaded_bytes += len(chunk)
 
                 hasher.update(chunk)
 
@@ -63,45 +124,24 @@ class DownloadManager:
                     chunk,
                 )
 
+            if (
+                request.expected_size is not None
+                and downloaded_bytes != request.expected_size
+            ):
+                state = DownloadState.FAILED
+
+            elif (
+                request.expected_sha256 is not None
+                and hasher.hexdigest().lower()
+                != request.expected_sha256.lower()
+            ):
+                state = DownloadState.FAILED
+
+            else:
+                state = DownloadState.COMPLETED
+
         except Exception:
-            duration = max(
-                0.0,
-                self.clock.now() - started_at,
-            )
-
-            progress = DownloadProgress(
-                downloaded_bytes=downloaded_bytes,
-                total_bytes=request.expected_size,
-                state=DownloadState.FAILED,
-            )
-
-            stats = TransferStats(
-                requested_bytes=request.expected_size or downloaded_bytes,
-                transferred_bytes=transferred_bytes,
-                retry_count=0,
-                connection_count=1,
-                duration_seconds=duration,
-            )
-
-            return DownloadResult(
-                progress=progress,
-                stats=stats,
-                destination=request.destination,
-            )
-
-        if (
-            request.expected_size is not None
-            and downloaded_bytes != request.expected_size
-        ):
             state = DownloadState.FAILED
-        elif (
-            request.expected_sha256 is not None
-            and hasher.hexdigest().lower()
-            != request.expected_sha256.lower()
-        ):
-            state = DownloadState.FAILED
-        else:
-            state = DownloadState.COMPLETED
 
         duration = max(
             0.0,
@@ -115,10 +155,13 @@ class DownloadManager:
         )
 
         stats = TransferStats(
-            requested_bytes=request.expected_size or downloaded_bytes,
+            requested_bytes=(
+                request.expected_size
+                or downloaded_bytes
+            ),
             transferred_bytes=transferred_bytes,
-            retry_count=0,
-            connection_count=1,
+            retry_count=retry_count,
+            connection_count=connection_count,
             duration_seconds=duration,
         )
 
