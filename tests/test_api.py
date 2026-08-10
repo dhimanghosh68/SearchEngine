@@ -393,3 +393,238 @@ def test_bulk_index_failure():
             raise AssertionError(
                 "Expected RuntimeError"
             )
+
+def test_initial_index_name():
+    from apps.api.services.index import initial_index_name
+
+    assert initial_index_name() == "documents_v1"
+
+
+def test_create_index_preserves_existing_alias():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from apps.api.services.index import create_index
+
+    client = AsyncMock()
+    client.indices.exists_alias = AsyncMock(return_value=True)
+
+    asyncio.run(create_index(client))
+
+    client.indices.exists_alias.assert_awaited_once_with(
+        name="documents",
+    )
+    client.indices.exists.assert_not_awaited()
+    client.indices.create.assert_not_awaited()
+    client.indices.put_alias.assert_not_awaited()
+
+
+def test_create_index_rejects_physical_alias_name_collision():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from apps.api.services.index import create_index
+
+    client = AsyncMock()
+    client.indices.exists_alias = AsyncMock(return_value=False)
+    client.indices.exists = AsyncMock(return_value=True)
+
+    try:
+        asyncio.run(create_index(client))
+    except RuntimeError as exc:
+        assert "exists as a physical index" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected RuntimeError for physical index collision"
+        )
+
+
+def test_create_index_creates_v1_and_alias():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from apps.api.services.index import (
+        DOCUMENT_MAPPING,
+        DOCUMENT_SETTINGS,
+        create_index,
+    )
+
+    client = AsyncMock()
+    client.indices.exists_alias = AsyncMock(return_value=False)
+
+    async def exists(index):
+        return index == "documents_v1"
+
+    client.indices.exists = AsyncMock(side_effect=exists)
+
+    asyncio.run(create_index(client))
+
+    client.indices.create.assert_not_awaited()
+
+    client.indices.put_alias.assert_awaited_once_with(
+        index="documents_v1",
+        name="documents",
+        is_write_index=True,
+    )
+
+
+def test_create_index_creates_v1_when_missing():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from apps.api.services.index import (
+        DOCUMENT_MAPPING,
+        DOCUMENT_SETTINGS,
+        create_index,
+    )
+
+    client = AsyncMock()
+    client.indices.exists_alias = AsyncMock(return_value=False)
+
+    async def exists(index):
+        return False
+
+    client.indices.exists = AsyncMock(side_effect=exists)
+
+    asyncio.run(create_index(client))
+
+    client.indices.create.assert_awaited_once_with(
+        index="documents_v1",
+        settings=DOCUMENT_SETTINGS,
+        mappings=DOCUMENT_MAPPING,
+    )
+
+    client.indices.put_alias.assert_awaited_once_with(
+        index="documents_v1",
+        name="documents",
+        is_write_index=True,
+    )
+
+def test_create_index_fresh_install():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from apps.api.services.index import create_index
+
+    client = AsyncMock()
+
+    client.indices.exists_alias = AsyncMock(return_value=False)
+    client.indices.exists = AsyncMock(
+        side_effect=[False, False]
+    )
+
+    asyncio.run(create_index(client))
+
+    client.indices.exists_alias.assert_awaited_once_with(
+        name="documents",
+    )
+
+    assert client.indices.exists.await_count == 2
+
+    client.indices.create.assert_awaited_once_with(
+        index="documents_v1",
+        settings=client.indices.create.await_args.kwargs["settings"],
+        mappings=client.indices.create.await_args.kwargs["mappings"],
+    )
+
+    client.indices.put_alias.assert_awaited_once_with(
+        index="documents_v1",
+        name="documents",
+        is_write_index=True,
+    )
+
+
+def test_create_index_rejects_unaliased_physical_index():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    import pytest
+
+    from apps.api.services.index import create_index
+
+    client = AsyncMock()
+
+    client.indices.exists_alias = AsyncMock(return_value=False)
+    client.indices.exists = AsyncMock(return_value=True)
+
+    with pytest.raises(
+        RuntimeError,
+        match="exists as a physical index",
+    ):
+        asyncio.run(create_index(client))
+
+    client.indices.create.assert_not_awaited()
+    client.indices.put_alias.assert_not_awaited()
+
+
+def test_create_index_reuses_existing_versioned_index():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from apps.api.services.index import create_index
+
+    client = AsyncMock()
+
+    client.indices.exists_alias = AsyncMock(return_value=False)
+    client.indices.exists = AsyncMock(
+        side_effect=[False, True]
+    )
+
+    asyncio.run(create_index(client))
+
+    client.indices.create.assert_not_awaited()
+
+    client.indices.put_alias.assert_awaited_once_with(
+        index="documents_v1",
+        name="documents",
+        is_write_index=True,
+    )
+
+def test_create_index_rejects_orphan_physical_index():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from apps.api.services.index import create_index
+
+    client = AsyncMock()
+
+    client.indices.exists_alias = AsyncMock(return_value=False)
+    client.indices.exists = AsyncMock(
+        side_effect=[True]
+    )
+
+    try:
+        asyncio.run(create_index(client))
+    except RuntimeError as exc:
+        assert "exists as a physical index" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected RuntimeError for orphan physical index"
+        )
+
+    client.indices.create.assert_not_awaited()
+    client.indices.put_alias.assert_not_awaited()
+
+
+def test_create_index_reuses_existing_initial_index():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from apps.api.services.index import create_index
+
+    client = AsyncMock()
+
+    client.indices.exists_alias = AsyncMock(return_value=False)
+    client.indices.exists = AsyncMock(
+        side_effect=[False, True]
+    )
+
+    asyncio.run(create_index(client))
+
+    client.indices.create.assert_not_awaited()
+
+    client.indices.put_alias.assert_awaited_once_with(
+        index="documents_v1",
+        name="documents",
+        is_write_index=True,
+    )
