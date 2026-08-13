@@ -69,6 +69,11 @@ class ResourceCapabilities:
     background_execution: bool = True
 
 
+class ResourceProvider(Protocol):
+    def capabilities(self) -> ResourceCapabilities:
+        ...
+
+
 @dataclass(frozen=True)
 class RuntimePaths:
     config: str
