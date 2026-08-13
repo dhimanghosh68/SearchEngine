@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI):
     app.state.config = application.config
     app.state.metadata = application.metadata
     app.state.search = application.search
+    app.state.downloads = application.downloads
 
     filesystem = application.runtime.capabilities.filesystem
 

@@ -7,6 +7,7 @@ from apps.api.config.application import (
     create_application_config,
 )
 from apps.api.core.runtime import Runtime, create_runtime
+from apps.api.download.controller import DownloadController
 from apps.api.download.manager import DownloadManager
 from apps.api.platform.adapters import (
     HttpNetworkClient,
@@ -29,7 +30,7 @@ class ApplicationRuntime:
     config: ApplicationConfig
     metadata: LocalMetadataStore
     search: SearchService
-    downloads: DownloadManager
+    downloads: DownloadController
 
 
 def create_application_runtime(
@@ -46,11 +47,12 @@ def create_application_runtime(
 
     network = HttpNetworkClient()
     clock = SystemClock()
+    process = SubprocessRunner()
 
     capabilities = PlatformCapabilities(
         filesystem=filesystem,
         network=network,
-        process=SubprocessRunner(),
+        process=process,
         clock=clock,
         resources=resources,
         paths=paths,
@@ -77,10 +79,14 @@ def create_application_runtime(
         index_name=index_name,
     )
 
-    downloads = DownloadManager(
+    download_manager = DownloadManager(
         network=network,
         storage=filesystem,
         clock=clock,
+    )
+
+    downloads = DownloadController(
+        manager=download_manager,
     )
 
     return ApplicationRuntime(
