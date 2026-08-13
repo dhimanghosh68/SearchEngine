@@ -18,6 +18,7 @@ from apps.api.platform.contracts import (
     PlatformCapabilities,
     RuntimePaths,
 )
+from apps.api.services.search import SearchService
 from apps.api.storage.local import LocalMetadataStore
 
 
@@ -26,6 +27,7 @@ class ApplicationRuntime:
     runtime: Runtime
     config: ApplicationConfig
     metadata: LocalMetadataStore
+    search: SearchService
 
 
 def create_application_runtime(
@@ -65,8 +67,14 @@ def create_application_runtime(
         root=paths.data,
     )
 
+    search = SearchService(
+        elasticsearch_url=elasticsearch_url,
+        index_name=index_name,
+    )
+
     return ApplicationRuntime(
         runtime=runtime,
         config=config,
         metadata=metadata,
+        search=search,
     )

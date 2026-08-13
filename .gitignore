@@ -37,3 +37,6 @@ postgres-data/
 
 # Redis
 redis-data/
+
+# Runtime state
+runtime/
