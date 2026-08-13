@@ -1,10 +1,17 @@
 import asyncio
 from contextlib import asynccontextmanager
-from apps.api.core.runtime import create_runtime
+
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from apps.api.config.settings import CORS_ORIGINS
+from apps.api.config.application import create_application_config
+from apps.api.config.settings import (
+    CORS_ORIGINS,
+    ELASTICSEARCH_URL,
+    INDEX_NAME,
+)
+from apps.api.core.application import create_application_runtime
+from apps.api.platform.contracts import RuntimePaths
 from apps.api.schemas.document import (
     BulkDocumentResponse,
     DocumentCreate,
@@ -20,9 +27,29 @@ from apps.api.services.search import SearchService
 search_service = SearchService()
 
 
+def create_runtime_paths() -> RuntimePaths:
+    return RuntimePaths(
+        config="config",
+        data="data",
+        cache="cache",
+        logs="logs",
+        runtime="runtime",
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.runtime = create_runtime()
+    application = create_application_runtime(
+        elasticsearch_url=ELASTICSEARCH_URL,
+        index_name=INDEX_NAME,
+        paths=create_runtime_paths(),
+    )
+
+    app.state.application = application
+    app.state.runtime = application.runtime
+    app.state.config = application.config
+    app.state.metadata = application.metadata
+
     for attempt in range(1, 11):
         try:
             client = search_service._client()
@@ -61,10 +88,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="SearchEngine API",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
-
 
 app.add_middleware(
     CORSMiddleware,
