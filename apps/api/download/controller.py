@@ -14,7 +14,7 @@ from apps.api.download.manager import DownloadManager
 @dataclass
 class DownloadOperation:
     request: DownloadRequest
-    task: asyncio.Task
+    task: asyncio.Task[DownloadProgress]
     state: DownloadState = DownloadState.PENDING
     result: object | None = None
 
@@ -151,7 +151,10 @@ class DownloadController:
     def status(self, destination: str) -> DownloadState:
         return self._require(destination).state
 
-    def _require(self, destination: str) -> DownloadOperation:
+    def _require(
+        self,
+        destination: str,
+    ) -> DownloadOperation:
         try:
             return self._operations[destination]
         except KeyError as exc:
