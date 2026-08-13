@@ -1,85 +1,67 @@
+from __future__ import annotations
+
 from elasticsearch import AsyncElasticsearch
 
-from apps.api.config.settings import INDEX_NAME
+DEFAULT_INDEX_NAME = "documents"
+INITIAL_INDEX_SUFFIX = "_v1"
 
 DOCUMENT_SETTINGS = {
-    "analysis": {
-        "analyzer": {
-            "document_text": {
-                "type": "custom",
-                "tokenizer": "standard",
-                "filter": [
-                    "lowercase",
-                ],
-            },
-        },
-    },
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
 }
 
 DOCUMENT_MAPPING = {
     "properties": {
         "title": {
             "type": "text",
-            "analyzer": "document_text",
-            "fields": {
-                "keyword": {
-                    "type": "keyword",
-                    "ignore_above": 512,
-                },
-            },
         },
         "url": {
             "type": "keyword",
         },
         "description": {
             "type": "text",
-            "analyzer": "document_text",
         },
         "content": {
             "type": "text",
-            "analyzer": "document_text",
         },
     }
 }
 
 
-def initial_index_name() -> str:
-    return f"{INDEX_NAME}_v1"
+def initial_index_name(
+    index_name: str = DEFAULT_INDEX_NAME,
+) -> str:
+    return f"{index_name}{INITIAL_INDEX_SUFFIX}"
 
 
-async def create_index(client: AsyncElasticsearch) -> None:
-    alias_exists = await client.indices.exists_alias(
-        name=INDEX_NAME,
-    )
+async def create_index(
+    client: AsyncElasticsearch,
+    *,
+    index_name: str = DEFAULT_INDEX_NAME,
+) -> None:
+    initial_name = initial_index_name(index_name)
 
-    if alias_exists:
+    # If the logical name is already an alias, preserve it.
+    if await client.indices.exists_alias(name=index_name):
         return
 
-    physical_index_exists = await client.indices.exists(
-        index=INDEX_NAME,
-    )
-
-    if physical_index_exists:
+    # The logical name cannot safely be both a physical index and
+    # the alias we expect to manage.
+    if await client.indices.exists(index_name):
         raise RuntimeError(
-            f"Index '{INDEX_NAME}' exists as a physical index "
-            "but is not configured as the application alias"
+            f"Index name '{index_name}' exists as a physical index"
         )
 
-    index_name = initial_index_name()
-
-    index_exists = await client.indices.exists(
-        index=index_name,
-    )
-
-    if not index_exists:
+    # Reuse an already-created versioned index.
+    if not await client.indices.exists(initial_name):
         await client.indices.create(
-            index=index_name,
+            index=initial_name,
             settings=DOCUMENT_SETTINGS,
             mappings=DOCUMENT_MAPPING,
         )
 
     await client.indices.put_alias(
-        index=index_name,
-        name=INDEX_NAME,
+        index=initial_name,
+        name=index_name,
         is_write_index=True,
     )
