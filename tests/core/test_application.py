@@ -23,3 +23,4 @@ def test_application_runtime_is_composed():
     )
     assert application.config.index_name == "documents"
     assert application.metadata is not None
+    assert application.downloads is not None
